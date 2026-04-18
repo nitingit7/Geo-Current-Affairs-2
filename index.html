@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive World News Map</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        /* CSS Variables for Industrial Dark Theme */
+        :root {
+            --bg-dark: #121212;
+            --panel-bg: #1e1e1e;
+            --card-bg: #2a2a2d;
+            --text-main: #f0f0f0;
+            --text-muted: #9aa0a6;
+            --accent-color: #00a8ff;
+            --border-color: #333333;
+        }
+
+        /* General Page Styling */
+        body { 
+            margin: 0; 
+            padding: 0; 
+            display: flex; 
+            flex-direction: row; 
+            height: 100vh; 
+            width: 100vw;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            overflow: hidden; 
+        }
+        
+        /* Map Container */
+        #map-container { 
+            width: 60%; 
+            height: 100%; 
+            position: relative;
+        }
+        #map { width: 100%; height: 100%; background-color: #0a0a0a; } 
+
+        /* Resizer Handle */
+        #resizer {
+            width: 8px;
+            background-color: var(--bg-dark);
+            border-left: 1px solid var(--border-color);
+            border-right: 1px solid var(--border-color);
+            cursor: col-resize;
+            z-index: 1001;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: none;
+        }
+        #resizer::before { content: "⋮"; color: var(--text-muted); font-size: 18px; }
+        
+        /* News Panel */
+        #news-panel { 
+            width: calc(40% - 8px); 
+            height: 100%; 
+            background: var(--panel-bg); 
+            overflow-y: auto; 
+            padding: 25px; 
+            box-sizing: border-box; 
+            z-index: 1000; 
+        }
+
+        /* Custom Scrollbar */
+        #news-panel::-webkit-scrollbar { width: 8px; }
+        #news-panel::-webkit-scrollbar-track { background: var(--panel-bg); }
+        #news-panel::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+        #news-panel::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        h2 { 
+            margin-top: 0; 
+            color: var(--text-main); 
+            border-bottom: 2px solid var(--border-color); 
+            padding-bottom: 12px;
+            font-weight: 600;
+        }
+        .instructions { color: var(--text-muted); font-size: 0.95em; margin-bottom: 25px; }
+
+        /* News Cards Styling */
+        .news-item { 
+            background: var(--card-bg); 
+            padding: 20px; 
+            margin-bottom: 20px; 
+            border: 1px solid var(--border-color);
+            border-radius: 4px; 
+            transition: border-color 0.2s ease, transform 0.2s ease;
+        }
+        .news-item:hover { border-color: var(--accent-color); transform: translateY(-2px); }
+        .news-item img { width: 100%; border-radius: 2px; margin-bottom: 15px; border: 1px solid #222; }
+        .news-item h3 { margin: 0 0 12px 0; font-size: 1.15em; color: var(--text-main); }
+        .news-item p { margin: 0 0 20px 0; font-size: 0.95em; color: var(--text-muted); line-height: 1.6; }
+        .news-item a { 
+            text-decoration: none; 
+            color: var(--accent-color); 
+            border: 1px solid var(--accent-color);
+            padding: 8px 16px; 
+            border-radius: 2px; 
+            font-size: 0.85em; 
+            font-weight: bold;
+            display: inline-block;
+            transition: all 0.2s ease;
+        }
+        .news-item a:hover { background-color: var(--accent-color); color: #000; }
+        .loading { font-style: italic; color: var(--accent-color); text-align: center; margin-top: 50px; }
+
+        /* Mobile Responsive */
+        @media (max-width: 800px) {
+            body { flex-direction: column; }
+            #map-container { width: 100% !important; height: 40%; }
+            #news-panel { width: 100% !important; height: calc(60% - 24px); }
+            
+            #resizer {
+                width: 100%; height: 24px; cursor: row-resize;
+                border-left: none; border-right: none;
+                border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);
+            }
+            #resizer::before {
+                content: ""; width: 40px; height: 4px; background-color: var(--text-muted); border-radius: 2px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map-container">
+        <div id="map"></div>
+    </div>
+    
+    <div id="resizer"></div>
+    
+    <div id="news-panel">
+        <h2>🌐 Global Intelligence</h2>
+        <p class="instructions">Select a region on the terminal map to interface with live local news broadcasts. Drag the handle to resize panels.</p>
+        <div id="news-content">
+            <p style="color: var(--text-muted); text-align: center; margin-top: 40px;">// AWAITING TARGET SELECTION //</p>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // ==========================================
+        // 1. RESIZER LOGIC
+        // ==========================================
+        const resizer = document.getElementById('resizer');
+        const mapContainer = document.getElementById('map-container');
+        const newsPanel = document.getElementById('news-panel');
+        let isDragging = false;
+
+        resizer.addEventListener('mousedown', () => isDragging = true);
+        resizer.addEventListener('touchstart', () => isDragging = true, {passive: true});
+
+        document.addEventListener('mouseup', () => isDragging = false);
+        document.addEventListener('touchend', () => isDragging = false);
+
+        document.addEventListener('mousemove', handleDrag);
+        document.addEventListener('touchmove', handleDrag, {passive: true});
+
+        function handleDrag(e) {
+            if (!isDragging) return;
+            if (window.innerWidth <= 800) {
+                let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                let newHeightPercent = (clientY / window.innerHeight) * 100;
+                if (newHeightPercent > 15 && newHeightPercent < 85) {
+                    mapContainer.style.height = `${newHeightPercent}%`;
+                    newsPanel.style.height = `calc(${100 - newHeightPercent}% - 24px)`;
+                    map.invalidateSize(); 
+                }
+            } else {
+                let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                let newWidthPercent = (clientX / window.innerWidth) * 100;
+                if (newWidthPercent > 20 && newWidthPercent < 80) {
+                    mapContainer.style.width = `${newWidthPercent}%`;
+                    newsPanel.style.width = `calc(${100 - newWidthPercent}% - 8px)`;
+                    map.invalidateSize(); 
+                }
+            }
+        }
+
+        // ==========================================
+        // 2. MAP LOGIC (Clamped Boundaries Added)
+        // ==========================================
+        
+        // Define strict edges of the world [SouthWest, NorthEast]
+        const worldBounds = [
+            [-90, -180], 
+            [90, 180]    
+        ];
+
+        // Initialize Map with boundaries and zoom limits
+        const map = L.map('map', {
+            maxBounds: worldBounds,       // Restrict panning
+            maxBoundsViscosity: 1.0,      // Make boundaries solid (no bouncing)
+            minZoom: 2                    // Prevent zooming out into empty space
+        }).setView([20, 0], 2);
+
+        // Background Base Map 
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CartoDB',
+            maxZoom: 20,
+            noWrap: true // Stops horizontal map repeating
+        }).addTo(map);
+
+        map.createPane('labels');
+        map.getPane('labels').style.zIndex = 650; 
+        map.getPane('labels').style.pointerEvents = 'none'; 
+
+        // Text Labels Map
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
+            pane: 'labels',
+            noWrap: true // Stops horizontal label repeating
+        }).addTo(map);
+
+        // ==========================================
+        // 3. FETCH NEWS LOGIC (Fast CorsProxy)
+        // ==========================================
+        const API_KEY = 'd30822e794784070fc8da8c3d358162e'; 
+
+        async function fetchNews(countryName) {
+            const newsContent = document.getElementById('news-content');
+            newsContent.innerHTML = `<div class="loading">ESTABLISHING CONNECTION TO <strong>${countryName.toUpperCase()}</strong>...<br><br>⏳</div>`;
+
+            try {
+                const targetUrl = `https://gnews.io/api/v4/search?q="${encodeURIComponent(countryName)}"&lang=en&max=10&apikey=${API_KEY}`;
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+
+                if (data.errors) return newsContent.innerHTML = `<p style="color:#ff4444;"><strong>SYSTEM ERROR:</strong> ${data.errors[0]}</p>`;
+
+                if (data.articles && data.articles.length > 0) {
+                    let html = `<h2>LATEST: ${countryName.toUpperCase()}</h2>`;
+                    data.articles.forEach(article => {
+                        html += `
+                            <div class="news-item">
+                                ${article.image ? `<img src="${article.image}" alt="Article thumbnail">` : ''}
+                                <h3>${article.title}</h3>
+                                <p>${article.description}</p>
+                                <a href="${article.url}" target="_blank">Access Full Report</a>
+                            </div>
+                        `;
+                    });
+                    newsContent.innerHTML = html;
+                } else {
+                    newsContent.innerHTML = `<h2>${countryName.toUpperCase()}</h2><p style="color: var(--text-muted);">No current intelligence reports found for this sector in English.</p>`;
+                }
+            } catch (error) {
+                console.error("Proxy or Fetch Error:", error);
+                newsContent.innerHTML = `<p style="color:#ff4444;">CONNECTION FAILED. The proxy server may be overloaded. Please wait a few seconds and try again.</p>`;
+            }
+        }
+
+        // ==========================================
+        // 4. INTERACTIVE COUNTRY BORDERS
+        // ==========================================
+        fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
+            .then(response => response.json())
+            .then(data => {
+                L.geoJSON(data, {
+                    style: function (feature) {
+                        return {
+                            color: "#555555", 
+                            weight: 1,
+                            fillColor: "#000000",
+                            fillOpacity: 0.1 
+                        };
+                    },
+                    onEachFeature: function (feature, layer) {
+                        layer.on('mouseover', function () {
+                            this.setStyle({ fillOpacity: 0.4, color: '#00a8ff', weight: 2, fillColor: '#004466' });
+                        });
+                        layer.on('mouseout', function () {
+                            this.setStyle({ fillOpacity: 0.1, color: '#555555', weight: 1, fillColor: '#000000' });
+                        });
+                        layer.on('click', function (e) {
+                            const countryName = feature.properties.name; 
+                            map.flyToBounds(e.target.getBounds(), { padding: [20, 20], duration: 1.2 }); 
+                            fetchNews(countryName); 
+                        });
+                    }
+                }).addTo(map);
+            })
+            .catch(error => console.error('Error loading map data:', error));
+
+    </script>
+</body>
+      </html>
+      
